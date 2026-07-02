@@ -84,7 +84,7 @@ class CafeConfig:
     company_number: str = "13977581"
     start: dt.date = dt.date(2024, 4, 1)  # first day of a month; FYE = 31 March
     months: int = 24
-    opening_bank_balance: int = 18_000_00
+    opening_bank_balance: int = 30_000_00
     share_capital: int = 100_00
 
     # Opening liabilities carried into the window (paid early in-window).
