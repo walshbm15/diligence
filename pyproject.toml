@@ -40,3 +40,6 @@ src = ["src", "tests", "evals"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/diligence/report/html.py" = ["E501"]  # inline CSS reads better unwrapped
