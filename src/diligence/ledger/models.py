@@ -131,7 +131,7 @@ class CafeConfig:
         start=dt.date(2021, 9, 29),
         term_years=10,
         annual_rent=26_000_00,
-        break_date=dt.date(2026, 9, 29),  # year-5 break
+        break_date=None,  # clean lease has no break; mutation M04 plants one
         break_notice_months=6,
         rent_review_date=dt.date(2026, 9, 29),
         inside_lta_1954=True,
