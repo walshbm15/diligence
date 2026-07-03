@@ -8,6 +8,7 @@ is known.
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 from diligence.dataroom.spec import DataRoomSpec, build_spec
@@ -82,15 +83,22 @@ def build_dataroom(root: Path, config: CafeConfig | None = None,
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
     (root / "mutation_log.json").write_text(
         json.dumps(spec.mutations, indent=2, default=str))
+    (root / "claims.json").write_text(
+        json.dumps([asdict(c) for c in spec.seller_claims], indent=2,
+                   default=str))
     return spec
 
 
 def main() -> None:
-    root = Path("data_rooms/copper_kettle_clean")
-    spec = build_dataroom(root)
-    n_docs = len(list((root / "clean").glob("*.pdf")))
-    print(f"Data room written to {root}/ ({n_docs} documents x {len(TIERS)} tiers)")
-    print(f"Mutations applied: {len(spec.mutations)}")
+    from diligence.mutations import DEFAULT_MUTATIONS
+
+    for name, mutations in (("copper_kettle_clean", None),
+                            ("copper_kettle_m1", DEFAULT_MUTATIONS)):
+        root = Path("data_rooms") / name
+        spec = build_dataroom(root, mutations=mutations)
+        n_docs = len(list((root / "clean").glob("*.pdf")))
+        print(f"{root}: {n_docs} documents x {len(TIERS)} tiers, "
+              f"{len(spec.mutations)} mutations")
 
 
 if __name__ == "__main__":

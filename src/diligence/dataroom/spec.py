@@ -185,6 +185,24 @@ class LeaseData:
 
 
 @dataclass
+class SellerClaim:
+    """A quantitative assertion by the seller (from calls / the IM).
+
+    POC scope: claims arrive as structured input alongside the data room;
+    full call-recording ingestion is Month 2. `metric` names what the claim
+    is about so checks can compute the comparable actual.
+    """
+    id: str
+    text: str
+    metric: str  # monthly_revenue_net | card_share | total_borrowings | weekly_takings_gross
+    value_gbp: int | None = None  # pence
+    value_ratio: float | None = None
+    period_start: dt.date | None = None
+    period_end: dt.date | None = None
+    source: str = "seller call"
+
+
+@dataclass
 class DataRoomSpec:
     company: CompanyInfo
     statutory_accounts: list[StatutoryAccountsData]  # one per FY
@@ -192,6 +210,7 @@ class DataRoomSpec:
     bank_statements: list[BankStatementData]  # one per month
     vat_returns: list[VatReturnData]  # one per quarter
     lease: LeaseData
+    seller_claims: list[SellerClaim] = field(default_factory=list)
     mutations: list[dict] = field(default_factory=list)  # applied mutation log
 
 
@@ -355,6 +374,8 @@ def build_spec(ledger: Ledger) -> DataRoomSpec:
         box5=r.box5, box6=round(r.box6 / 100) * 100, box7=round(r.box7 / 100) * 100,
     ) for r in vat_returns(ledger)]
 
+    claims = _truthful_claims(ledger, cfg, mgmt, stat_accounts)
+
     return DataRoomSpec(
         company=company,
         statutory_accounts=stat_accounts,
@@ -362,4 +383,52 @@ def build_spec(ledger: Ledger) -> DataRoomSpec:
         bank_statements=statements,
         vat_returns=vats,
         lease=LeaseData.from_terms(cfg.lease, tenant=cfg.company_name),
+        seller_claims=claims,
     )
+
+
+def _truthful_claims(ledger: Ledger, cfg: CafeConfig, mgmt: ManagementPnlData,
+                     stat_accounts: list[StatutoryAccountsData]) -> list[SellerClaim]:
+    """Seller claims that match the ledger. Mutations may inflate them."""
+    from diligence.ledger.models import TxnType
+
+    aug = next(m for m in mgmt.months
+               if m.period_start.month == 8 and m.period_start.year == cfg.start.year + 1)
+    aug_value = round(aug.revenue / 500_00) * 500_00
+
+    fy2 = stat_accounts[-1]
+    borrowings = fy2.balance.note_loan_within_year + fy2.balance.note_loan_after_year
+
+    fy2_gross = sum(t.amount for t in ledger.of_type(TxnType.SALE)
+                    if fy2.fy_start <= t.date <= fy2.fy_end)
+    weekly = round(fy2_gross / 52 / 100_00) * 100_00
+
+    return [
+        SellerClaim(
+            id="C1",
+            text=f"August is our best month — we did about "
+                 f"£{aug_value // 100:,} last August.",
+            metric="monthly_revenue_net", value_gbp=aug_value,
+            period_start=aug.period_start, period_end=aug.period_end,
+        ),
+        SellerClaim(
+            id="C2",
+            text="Roughly three quarters of takings go through the card "
+                 "machine; the rest is cash.",
+            metric="card_share", value_ratio=round(cfg.card_share, 2),
+            period_start=fy2.fy_start, period_end=fy2.fy_end,
+        ),
+        SellerClaim(
+            id="C3",
+            text=f"The only borrowing is the Funding Circle loan, about "
+                 f"£{borrowings // 100:,} left on it.",
+            metric="total_borrowings", value_gbp=borrowings,
+            period_end=fy2.fy_end,
+        ),
+        SellerClaim(
+            id="C4",
+            text=f"Takings run about £{weekly // 100:,} a week across the year.",
+            metric="weekly_takings_gross", value_gbp=weekly,
+            period_start=fy2.fy_start, period_end=fy2.fy_end,
+        ),
+    ]

@@ -186,15 +186,20 @@ def render_statutory_accounts(company: CompanyInfo, data: StatutoryAccountsData,
         ["Taxation and social security (VAT, PAYE/NIC)",
          money(b.note_vat + b.note_paye, pounds_only=True)],
         ["Corporation tax", money(b.note_ct, pounds_only=True)],
-        ["Bank loans (current portion)",
-         money(b.note_loan_within_year, pounds_only=True)],
-        ["", money(b.creditors_within_year, pounds_only=True)],
-        ["Amounts falling due after more than one year:", ""],
-        ["Bank loans", money(b.note_loan_after_year, pounds_only=True)],
     ]
+    # A seller hiding debt omits the loan lines rather than printing zeros.
+    if b.note_loan_within_year:
+        cred_rows.append(["Bank loans (current portion)",
+                          money(b.note_loan_within_year, pounds_only=True)])
+    cred_rows.append(["", money(b.creditors_within_year, pounds_only=True)])
+    total_row = len(cred_rows) - 1
+    if b.note_loan_after_year:
+        cred_rows += [["Amounts falling due after more than one year:", ""],
+                      ["Bank loans", money(b.note_loan_after_year,
+                                           pounds_only=True)]]
     t = Table(cred_rows, colWidths=[95 * mm, 35 * mm])
     t.setStyle(_NUM_STYLE)
-    _rule(t, 4, cols=(1,))
+    _rule(t, total_row, cols=(1,))
     notes.append(t)
     if data.loan_disclosure:
         notes += [Spacer(0, 3 * mm), Paragraph(data.loan_disclosure, BASE)]
