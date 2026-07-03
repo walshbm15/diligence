@@ -86,7 +86,50 @@ def build_dataroom(root: Path, config: CafeConfig | None = None,
     (root / "claims.json").write_text(
         json.dumps([asdict(c) for c in spec.seller_claims], indent=2,
                    default=str))
+    cfg = ledger.config
+    (root / "companies_house.json").write_text(
+        json.dumps(companies_house_fixture(cfg), indent=2))
     return spec
+
+
+def companies_house_fixture(cfg) -> dict:
+    """External-registry truth for the synthetic company.
+
+    Uses raw Companies House API field names so CompaniesHouseFixture and
+    the real client are interchangeable. The charge here is what T3.CHARGES
+    reconciles against the seller's disclosed debts — it stays outstanding
+    even when the mutated accounts hide the loan.
+    """
+    return {
+        "profile": {
+            "company_name": cfg.company_name,
+            "company_number": cfg.company_number,
+            "company_status": "active",
+            "type": "ltd",
+            "date_of_creation": "2021-08-04",
+            "registered_office_address": {
+                "address_line_1": cfg.lease.premises.split(",")[0],
+                "locality": "Shrewsbury",
+                "postal_code": "SY1 1LN",
+            },
+            "sic_codes": ["56102"],  # unlicensed restaurants and cafes
+        },
+        "officers": [{
+            "name": "HOLT, Margaret",
+            "officer_role": "director",
+            "appointed_on": "2021-08-04",
+        }],
+        "charges": [{
+            "charge_code": cfg.loan.charge_id,
+            "status": "outstanding",
+            "created_on": str(cfg.loan.start),
+            "persons_entitled": [{"name": cfg.loan.lender}],
+            "particulars": {
+                "description": "Fixed and floating charge over all the "
+                               "property or undertaking of the company.",
+            },
+        }],
+    }
 
 
 def main() -> None:
