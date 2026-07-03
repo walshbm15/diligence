@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "AI due-diligence engine for UK small-business acquisitions"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=0.95",
     "pydantic>=2.7",
     "reportlab>=4.1",
     "pypdfium2>=4.28",

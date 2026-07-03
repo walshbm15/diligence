@@ -107,13 +107,15 @@ def test_insert_and_fetch_roundtrip(conn):
 
 
 def test_db_rejects_missing_provenance(conn):
-    with pytest.raises(Exception):
+    import psycopg
+
+    with pytest.raises(psycopg.errors.CheckViolation):
         conn.execute(
             "INSERT INTO fact (dataroom, tier, doc_type, fact_type, "
             "source_doc, page, confidence) "
             "VALUES ('test_room', 'clean', 'lease', 'x', '', 1, 0.9)")
     conn.rollback()
-    with pytest.raises(Exception):
+    with pytest.raises(psycopg.errors.CheckViolation):
         conn.execute(
             "INSERT INTO fact (dataroom, tier, doc_type, fact_type, "
             "source_doc, page, confidence) "
