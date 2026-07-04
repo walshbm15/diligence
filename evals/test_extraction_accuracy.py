@@ -108,7 +108,8 @@ def test_live_extraction_accuracy(tier, conn, expected):
     from diligence.facts.db import fetch_facts, row_to_fact
 
     extractor = ClaudeExtractor()
-    result = extract_dataroom(conn, extractor, ROOM, tier)
+    # resume=True: re-runs only pay for documents that failed last time
+    result = extract_dataroom(conn, extractor, ROOM, tier, resume=True)
     assert not result.failures, result.failures
 
     rows = fetch_facts(conn, ROOM.name, tier)

@@ -10,3 +10,4 @@ build/
 .ruff_cache/
 output/
 data_rooms/
+smoke_test/

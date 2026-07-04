@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,10 +55,24 @@ class ClaudeExtractor:
         import anthropic
 
         self.model = model or os.environ.get("EXTRACTION_MODEL", DEFAULT_MODEL)
-        self.client = anthropic.Anthropic()
+        # Generous read timeout: bank statements stream large JSON slowly.
+        self.client = anthropic.Anthropic(timeout=900.0, max_retries=3)
         self.usage = UsageLog(model=self.model)
 
     def extract(self, pdf_path: Path, doc_type: str) -> dict:
+        import anthropic
+
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                return self._extract_once(pdf_path, doc_type)
+            except (anthropic.APIConnectionError, anthropic.RateLimitError,
+                    anthropic.InternalServerError) as exc:
+                last_exc = exc
+                time.sleep(5 * (attempt + 1))
+        raise last_exc
+
+    def _extract_once(self, pdf_path: Path, doc_type: str) -> dict:
         pdf_b64 = base64.standard_b64encode(pdf_path.read_bytes()).decode()
         with self.client.messages.stream(
             model=self.model,

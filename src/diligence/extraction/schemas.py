@@ -25,6 +25,28 @@ def _amount(description: str) -> dict:
     }
 
 
+def _amount_solid(description: str) -> dict:
+    """Non-nullable amount: structured outputs allow at most 16 union-typed
+    parameters per schema, and the statutory-accounts schema exceeds that
+    with nullable leaves. Absent/illegible is encoded as value 0 with
+    confidence 0 instead."""
+    return {
+        "type": "object",
+        "description": description,
+        "properties": {
+            "value": {"type": "number",
+                      "description": "Amount in pounds (negative if shown in "
+                                     "brackets); 0 with confidence 0 if the "
+                                     "line is absent or illegible"},
+            "confidence": {"type": "number",
+                           "description": "0-1 confidence in the reading; 0 "
+                                          "when the line is absent"},
+        },
+        "required": ["value", "confidence"],
+        "additionalProperties": False,
+    }
+
+
 def _page(description: str = "1-based page number the section appears on") -> dict:
     return {"type": "integer", "description": description}
 
@@ -37,14 +59,14 @@ STATUTORY_ACCOUNTS_SCHEMA = {
             "type": "object",
             "properties": {
                 "page": _page(),
-                "turnover": _amount("Turnover"),
-                "raw_materials": _amount("Cost of raw materials and consumables "
+                "turnover": _amount_solid("Turnover"),
+                "raw_materials": _amount_solid("Cost of raw materials and consumables "
                                          "(positive number)"),
-                "staff_costs": _amount("Staff costs (positive number)"),
-                "depreciation": _amount("Depreciation (positive number)"),
-                "other_charges": _amount("Other charges (positive number)"),
-                "profit_before_tax": _amount("Profit before tax"),
-                "tax": _amount("Tax (positive number)"),
+                "staff_costs": _amount_solid("Staff costs (positive number)"),
+                "depreciation": _amount_solid("Depreciation (positive number)"),
+                "other_charges": _amount_solid("Other charges (positive number)"),
+                "profit_before_tax": _amount_solid("Profit before tax"),
+                "tax": _amount_solid("Tax (positive number)"),
             },
             "required": ["page", "turnover", "raw_materials", "staff_costs",
                          "depreciation", "other_charges", "profit_before_tax",
@@ -55,17 +77,17 @@ STATUTORY_ACCOUNTS_SCHEMA = {
             "type": "object",
             "properties": {
                 "page": _page(),
-                "fixed_assets": _amount("Fixed assets"),
-                "current_assets": _amount("Current assets"),
-                "creditors_within_year": _amount(
+                "fixed_assets": _amount_solid("Fixed assets"),
+                "current_assets": _amount_solid("Current assets"),
+                "creditors_within_year": _amount_solid(
                     "Creditors: amounts falling due within one year "
                     "(positive number even if shown in brackets)"),
-                "creditors_after_year": _amount(
+                "creditors_after_year": _amount_solid(
                     "Creditors: amounts falling due after more than one year "
                     "(positive number)"),
-                "net_assets": _amount("Net assets"),
-                "share_capital": _amount("Called up share capital"),
-                "retained_earnings": _amount("Profit and loss account"),
+                "net_assets": _amount_solid("Net assets"),
+                "share_capital": _amount_solid("Called up share capital"),
+                "retained_earnings": _amount_solid("Profit and loss account"),
             },
             "required": ["page", "fixed_assets", "current_assets",
                          "creditors_within_year", "creditors_after_year",
@@ -76,17 +98,17 @@ STATUTORY_ACCOUNTS_SCHEMA = {
             "type": "object",
             "properties": {
                 "page": _page(),
-                "average_employees": {"type": ["integer", "null"]},
-                "loan_within_year": _amount(
-                    "Bank loans current portion from creditors note; value "
-                    "null if no such line exists"),
-                "loan_after_year": _amount(
-                    "Bank loans due after one year from creditors note; value "
-                    "null if no such line exists"),
+                "average_employees": {"type": "integer", "description": "0 if not stated"},
+                "loan_within_year": _amount_solid(
+                    "Bank loans current portion from creditors note; 0 "
+                    "if no such line exists"),
+                "loan_after_year": _amount_solid(
+                    "Bank loans due after one year from creditors note; 0 "
+                    "if no such line exists"),
                 "loan_disclosure": {
-                    "type": ["string", "null"],
+                    "type": "string",
                     "description": "Verbatim loan/charge disclosure paragraph "
-                                   "if present, else null"},
+                                   "if present, else empty string"},
             },
             "required": ["page", "average_employees", "loan_within_year",
                          "loan_after_year", "loan_disclosure"],

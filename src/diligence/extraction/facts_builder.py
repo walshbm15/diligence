@@ -72,8 +72,10 @@ def _statutory(data: dict, **ctx) -> list[Fact]:
     notes = data["notes"]
     for key, ft in (("loan_within_year", FactType.STAT_LOAN_WITHIN_YEAR),
                     ("loan_after_year", FactType.STAT_LOAN_AFTER_YEAR)):
-        add(notes, key, ft)
-    if notes["average_employees"] is not None:
+        # Schema is non-nullable (union limit); value 0 = no such note line
+        if notes[key]["value"]:
+            add(notes, key, ft)
+    if notes["average_employees"]:
         facts.append(Fact(
             **base, fact_type=FactType.STAT_AVG_EMPLOYEES, page=notes["page"],
             confidence=1.0, value_num=float(notes["average_employees"]),
