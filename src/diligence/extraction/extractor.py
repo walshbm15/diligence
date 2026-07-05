@@ -51,25 +51,43 @@ class ClaudeExtractor:
 
     name = "claude"
 
+    # Hard wall-clock cap per attempt. A wedged connection can trickle just
+    # enough to keep resetting httpx's per-chunk read timeout and hang a run
+    # for hours; per-chunk timeouts are NOT a deadline.
+    ATTEMPT_DEADLINE_S = 600
+
     def __init__(self, model: str | None = None):
         import anthropic
+        import httpx
 
         self.model = model or os.environ.get("EXTRACTION_MODEL", DEFAULT_MODEL)
-        # Generous read timeout: bank statements stream large JSON slowly.
-        self.client = anthropic.Anthropic(timeout=900.0, max_retries=3)
+        self.client = anthropic.Anthropic(
+            timeout=httpx.Timeout(120.0, connect=10.0), max_retries=2)
         self.usage = UsageLog(model=self.model)
 
     def extract(self, pdf_path: Path, doc_type: str) -> dict:
+        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import TimeoutError as FuturesTimeout
+
         import anthropic
 
         last_exc: Exception | None = None
         for attempt in range(3):
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(self._extract_once, pdf_path, doc_type)
             try:
-                return self._extract_once(pdf_path, doc_type)
+                return future.result(timeout=self.ATTEMPT_DEADLINE_S)
+            except FuturesTimeout:
+                last_exc = TimeoutError(
+                    f"extraction exceeded {self.ATTEMPT_DEADLINE_S}s deadline")
             except (anthropic.APIConnectionError, anthropic.RateLimitError,
                     anthropic.InternalServerError) as exc:
                 last_exc = exc
-                time.sleep(5 * (attempt + 1))
+            finally:
+                # Don't block on a wedged worker thread; let it die with the
+                # abandoned socket.
+                executor.shutdown(wait=False, cancel_futures=True)
+            time.sleep(5 * (attempt + 1))
         raise last_exc
 
     def _extract_once(self, pdf_path: Path, doc_type: str) -> dict:
