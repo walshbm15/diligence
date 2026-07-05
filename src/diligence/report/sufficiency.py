@@ -54,7 +54,10 @@ def assess(facts: FactIndex, needs_review: int = 0,
            expected_fys: int = 2) -> SufficiencyReport:
     bank_docs = {f.source_doc for f in facts.of(FactType.BANK_CLOSING_BALANCE)}
     vat_docs = {f.source_doc for f in facts.of(FactType.VAT_BOX6)}
-    stat_docs = {f.source_doc for f in facts.of(FactType.STAT_TURNOVER)}
+    # Presence marker is a balance-sheet line: small companies legally file
+    # without a P&L, so turnover's absence doesn't mean the accounts are
+    # missing (learned from a real CH filing).
+    stat_docs = {f.source_doc for f in facts.of(FactType.STAT_NET_ASSETS)}
     mgmt_months = {f.period_start for f in facts.of(FactType.MGMT_REVENUE)}
     lease = 1 if facts.of(FactType.LEASE_ANNUAL_RENT) else 0
 

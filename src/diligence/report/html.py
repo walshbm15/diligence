@@ -125,10 +125,20 @@ def render_report(company_name: str, company_number: str,
 
     all_clear = ""
     if not reds and not ambers:
-        all_clear = ("<section><h2>Findings</h2><div class='clear'>No "
-                     "reconciliation discrepancies found across the checks "
-                     "run. The documents agree with each other and with the "
-                     "external registers checked.</div></section>")
+        if sufficiency.score >= 50:
+            all_clear = ("<section><h2>Findings</h2><div class='clear'>No "
+                         "reconciliation discrepancies found across the "
+                         "checks run. The documents agree with each other "
+                         "and with the external registers checked."
+                         "</div></section>")
+        else:
+            all_clear = ("<section><h2>Findings</h2><div class='clear' "
+                         "style='color:#9a6a00'>No discrepancies were found, "
+                         "but with a document sufficiency score of "
+                         f"{sufficiency.score}/100 there was too little "
+                         "evidence to reconcile. This is NOT a clean bill of "
+                         "health — close the gaps above before drawing any "
+                         "comfort from this report.</div></section>")
 
     return f"""<!doctype html>
 <html lang="en">
