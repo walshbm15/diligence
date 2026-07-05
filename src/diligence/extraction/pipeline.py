@@ -18,6 +18,7 @@ class ExtractionResult:
     facts: int = 0
     needs_review: int = 0
     failures: list[str] = field(default_factory=list)
+    unclassified: list[str] = field(default_factory=list)
 
 
 def _docs_with_facts(conn, dataroom: str, tier: str) -> set[str]:
@@ -29,12 +30,15 @@ def _docs_with_facts(conn, dataroom: str, tier: str) -> set[str]:
 
 def extract_dataroom(conn, extractor, room_dir: Path, tier: str,
                      dataroom: str | None = None,
-                     resume: bool = False) -> ExtractionResult:
+                     resume: bool = False,
+                     classifier=None) -> ExtractionResult:
     """Extract every PDF in `room_dir/tier` into the fact table.
 
     Idempotent per document (each doc's prior facts are replaced). With
     `resume=True`, documents that already have facts are skipped — for
     re-running after partial failures without re-paying for the rest.
+    Files the classifier can't place are reported in `unclassified`,
+    never silently dropped.
     """
     from diligence.facts.db import insert_facts
 
@@ -44,11 +48,15 @@ def extract_dataroom(conn, extractor, room_dir: Path, tier: str,
 
     done = _docs_with_facts(conn, dataroom, tier) if resume else set()
     for pdf in sorted(tier_dir.glob("*.pdf")):
-        doc_type = doc_type_for(pdf.name)
-        if doc_type is None:
-            continue
         if pdf.name in done:
             result.skipped += 1
+            continue
+        if classifier is not None:
+            doc_type = classifier.classify(pdf)
+        else:
+            doc_type = doc_type_for(pdf.name)
+        if doc_type is None:
+            result.unclassified.append(pdf.name)
             continue
         try:
             data = extractor.extract(pdf, doc_type)
@@ -85,11 +93,14 @@ def main() -> None:
                         help="skip documents that already have facts")
     args = parser.parse_args()
 
+    from diligence.ingest import Classifier
+
     conn = connect()
     init_db(conn)
     extractor = ClaudeExtractor(model=args.model)
     result = extract_dataroom(conn, extractor, args.room_dir, args.tier,
-                              resume=args.resume)
+                              resume=args.resume,
+                              classifier=Classifier(model=args.model))
     u = extractor.usage
     print(f"{result.dataroom}/{result.tier}: {result.documents} docs "
           f"({result.skipped} skipped), {result.facts} facts "
@@ -99,6 +110,8 @@ def main() -> None:
           f"{u.output_tokens:,} out tokens, ~${u.cost_usd:.2f}")
     for failure in result.failures:
         print(f"FAILED: {failure}")
+    for name in result.unclassified:
+        print(f"UNRECOGNISED (not extracted): {name}")
     conn.close()
 
 
