@@ -9,7 +9,9 @@ Pytest-based eval harness (golden rule 3: eval-driven development).
 - Extraction evals are stratified by document quality tier
   (clean / scanned / photographed).
 
-## Current results (check layer, ground-truth facts)
+## Current results
+
+**Check layer (ground-truth facts):**
 
 | Metric | Result | Exit criterion |
 |---|---|---|
@@ -18,6 +20,14 @@ Pytest-based eval harness (golden rule 3: eval-driven development).
 | Amber recall | 2/3 (miss = T2 check, out of POC scope) | — |
 | False positives on clean room | **0** | 0 ✅ |
 | Hallucinated citations | **0** | 0 ✅ |
+
+**Live extraction (Opus 4.8, measured 2026-07-05, ~1,763 facts/tier):**
+
+| Tier | Overall accuracy | Criterion |
+|---|---|---|
+| Clean | **100.0%** | ≥95%/doc type ✅ |
+| Scanned | **100.0%** | kill if <85% — safe ✅ |
+| Photographed | **98.2%** | (misses: dense bank rows, 3 P&L cells) |
 
 ## Running
 

@@ -79,10 +79,12 @@ truth), `facts/` (Postgres fact table, provenance NOT NULL), `extraction/`
 7/7 red, 0 false positives on clean room, 0 hallucinated citations.
 Week 3 exit criterion met.
 
+**Live extraction measured (2026-07-05, Opus 4.8):** clean 100.0%,
+scanned 100.0%, photographed 98.2% — issue #8 CLOSED, exit criterion
+met, kill criterion safe. Re-run: `.venv/bin/python
+scripts/run_extraction_eval.py` (resumes; only pays for missing docs).
+
 **Open issues & blockers:**
-- #8 — live extraction accuracy (Week 2 exit: ≥95% clean/doc type).
-  BLOCKED on `ANTHROPIC_API_KEY` in `.env`. Run:
-  `docker compose up -d && .venv/bin/pytest evals/test_extraction_accuracy.py -s`
 - #17 — real data room run (needs real documents from Brian)
 - #18 — 5–10 validation interviews, two questions only, price test
 - #19 — Month 1 gate decision record (go/pivot/kill against
