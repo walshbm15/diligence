@@ -101,9 +101,11 @@ def fetch_facts(conn: psycopg.Connection, dataroom: str, tier: str,
 
 def facts_needing_review(conn: psycopg.Connection, dataroom: str,
                          tier: str, threshold: float) -> list[dict]:
+    """Quarantined facts not yet resolved by a human reviewer."""
     return conn.execute(
         "SELECT * FROM fact WHERE dataroom = %s AND tier = %s "
-        "AND confidence < %s ORDER BY confidence",
+        "AND confidence < %s AND NOT (attrs ? 'reviewed') "
+        "ORDER BY source_doc, page, id",
         (dataroom, tier, threshold)).fetchall()
 
 

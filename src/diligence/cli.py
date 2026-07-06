@@ -16,6 +16,8 @@ def main() -> None:
                    add_help=False)
     sub.add_parser("report", help="Generate a Red Flag Report",
                    add_help=False)
+    sub.add_parser("review", help="Review quarantined low-confidence facts",
+                   add_help=False)
     args, _rest = parser.parse_known_args()
 
     # Sub-commands own their remaining argv
@@ -33,6 +35,10 @@ def main() -> None:
         from diligence.report.generate import main as report_main
 
         report_main()
+    elif args.command == "review":
+        from diligence.review.flow import main as review_main
+
+        review_main()
     else:
         parser.print_help()
 
