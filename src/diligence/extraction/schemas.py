@@ -86,12 +86,16 @@ STATUTORY_ACCOUNTS_SCHEMA = {
                     "Creditors: amounts falling due after more than one year "
                     "(positive number)"),
                 "net_assets": _amount_solid("Net assets"),
+                "accruals_deferred_income": _amount_solid(
+                    "Accruals and deferred income, if shown as its own "
+                    "balance-sheet line (positive number)"),
                 "share_capital": _amount_solid("Called up share capital"),
                 "retained_earnings": _amount_solid("Profit and loss account"),
             },
             "required": ["page", "fixed_assets", "current_assets",
                          "creditors_within_year", "creditors_after_year",
-                         "net_assets", "share_capital", "retained_earnings"],
+                         "net_assets", "accruals_deferred_income",
+                         "share_capital", "retained_earnings"],
             "additionalProperties": False,
         },
         "notes": {

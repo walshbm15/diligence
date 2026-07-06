@@ -29,6 +29,7 @@ class FactType(StrEnum):
     STAT_CREDITORS_WITHIN_YEAR = "stat_creditors_within_year"
     STAT_CREDITORS_AFTER_YEAR = "stat_creditors_after_year"
     STAT_NET_ASSETS = "stat_net_assets"
+    STAT_ACCRUALS_DEFERRED = "stat_accruals_deferred"
     STAT_LOAN_WITHIN_YEAR = "stat_loan_within_year"
     STAT_LOAN_AFTER_YEAR = "stat_loan_after_year"
     STAT_AVG_EMPLOYEES = "stat_avg_employees"

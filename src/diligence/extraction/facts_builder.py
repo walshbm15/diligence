@@ -68,6 +68,8 @@ def _statutory(data: dict, **ctx) -> list[Fact]:
                     ("creditors_after_year", FactType.STAT_CREDITORS_AFTER_YEAR),
                     ("net_assets", FactType.STAT_NET_ASSETS)):
         add(bs, key, ft)
+    if bs.get("accruals_deferred_income", {}).get("value"):
+        add(bs, "accruals_deferred_income", FactType.STAT_ACCRUALS_DEFERRED)
 
     notes = data["notes"]
     for key, ft in (("loan_within_year", FactType.STAT_LOAN_WITHIN_YEAR),
