@@ -101,6 +101,8 @@ def render_report(company_name: str, company_number: str,
                   dataroom: str, tier: str,
                   generated: dt.date | None = None) -> str:
     generated = generated or dt.date.today()
+    company_no = (f"Company No. {escape(company_number)} · "
+                  if company_number else "")
     reds = [f for f in findings if f.severity == "red"]
     ambers = [f for f in findings if f.severity == "amber"]
     infos = [f for f in findings if f.severity == "info"]
@@ -153,7 +155,7 @@ def render_report(company_name: str, company_number: str,
   <header class="masthead">
     <div class="kicker">Diligence OS · Red Flag Report</div>
     <h1>{escape(company_name)}</h1>
-    <div class="meta">Company No. {escape(company_number)} · Data room:
+    <div class="meta">{company_no}Data room:
     {escape(dataroom)} ({escape(tier)} documents) · Generated {generated:%-d %B %Y}</div>
   </header>
 

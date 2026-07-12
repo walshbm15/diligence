@@ -88,6 +88,122 @@ def test_text_rule_priorities():
     assert classify_by_text("") is None
 
 
+# --- Real-folder ingestion ----------------------------------------------
+
+
+def test_scan_folder_accounts_for_every_file(tmp_path):
+    from diligence.ingest import scan_folder
+
+    (tmp_path / "financials").mkdir()
+    (tmp_path / "financials" / "Q2 24 return HMRC.pdf").write_bytes(b"%PDF")
+    (tmp_path / "lease scan.pdf").write_bytes(b"%PDF")
+    (tmp_path / "suppliers.xlsx").write_bytes(b"xx")
+    (tmp_path / "notes.docx").write_bytes(b"xx")
+    (tmp_path / ".DS_Store").write_bytes(b"junk")
+    (tmp_path / "__MACOSX").mkdir()
+    (tmp_path / "__MACOSX" / "._lease scan.pdf").write_bytes(b"junk")
+
+    inv = scan_folder(tmp_path)
+    assert [p.as_posix() for p in inv.pdfs] == [
+        "financials/Q2 24 return HMRC.pdf", "lease scan.pdf"]
+    assert [p.as_posix() for p in inv.unsupported] == [
+        "notes.docx", "suppliers.xlsx"]
+    assert inv.ignored == 2  # .DS_Store + __MACOSX resource fork
+
+
+def test_unpack_zip(tmp_path):
+    import zipfile
+
+    from diligence.ingest import unpack_zip
+
+    zip_path = tmp_path / "dataroom.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("accounts/fy25.pdf", "%PDF")
+    root = unpack_zip(zip_path)
+    assert root == tmp_path / "dataroom"
+    assert (root / "accounts" / "fy25.pdf").exists()
+    # Second call is a no-op, not a re-extract
+    assert unpack_zip(zip_path) == root
+
+
+VAT_JSON = {
+    "period_start": "2024-04-01", "period_end": "2024-06-30", "page": 1,
+    "box1": {"value": 16325.78, "confidence": 0.99},
+    "box2": {"value": 0.0, "confidence": 0.99},
+    "box3": {"value": 16325.78, "confidence": 0.99},
+    "box4": {"value": 544.12, "confidence": 0.98},
+    "box5": {"value": 15781.66, "confidence": 0.99},
+    "box6": {"value": 98915.0, "confidence": 0.99},
+    "box7": {"value": 41398.0, "confidence": 0.97},
+}
+
+
+def test_ingest_folder_end_to_end(tmp_path, messy_room):
+    import psycopg
+
+    from diligence.extraction.extractor import FakeExtractor
+    from diligence.facts import connect, init_db
+    from diligence.facts.db import fetch_facts, row_to_fact
+    from diligence.ingest import REAL_TIER, Classifier, ingest_folder
+    from diligence.report.generate import build_report
+
+    try:
+        conn = connect()
+    except psycopg.OperationalError:
+        pytest.skip("Postgres not reachable")
+    init_db(conn)
+
+    # A believable real folder: nested dirs, a spreadsheet, OS junk, and a
+    # PDF the classifier can't place.
+    (tmp_path / "financials").mkdir()
+    vat_src = next(p for p in messy_room.glob("*.pdf") if "return" in p.name)
+    shutil.copy(vat_src, tmp_path / "financials" / "Q2 24 return HMRC.pdf")
+    (tmp_path / "suppliers.xlsx").write_bytes(b"xx")
+    (tmp_path / ".DS_Store").write_bytes(b"junk")
+    from reportlab.pdfgen import canvas
+
+    c = canvas.Canvas(str(tmp_path / "holiday rota.pdf"))
+    c.drawString(100, 700, "Staff holiday rota")
+    c.save()
+
+    extractor = FakeExtractor(responses={"Q2 24 return HMRC.pdf": VAT_JSON})
+    try:
+        result = ingest_folder(conn, extractor, tmp_path,
+                               dataroom="ingest_folder_test",
+                               classifier=Classifier(use_llm=False))
+        assert result.documents == 1
+        assert result.by_type == {"vat_return": 1}
+        assert result.unclassified == ["holiday rota.pdf"]
+        assert result.unsupported == ["suppliers.xlsx"]
+        assert result.ignored == 1
+
+        # source_doc is the RELATIVE PATH, so nested duplicates can't collide
+        rows = fetch_facts(conn, "ingest_folder_test", REAL_TIER)
+        assert rows and all(
+            r["source_doc"] == "financials/Q2 24 return HMRC.pdf"
+            for r in rows)
+
+        # resume skips paid work
+        again = ingest_folder(conn, extractor, tmp_path,
+                              dataroom="ingest_folder_test", resume=True,
+                              classifier=Classifier(use_llm=False))
+        assert again.skipped == 1 and again.documents == 0
+
+        # The report path needs no manifest/claims/fixture for a real room
+        facts = [row_to_fact(r) for r in rows]
+        path = build_report(
+            facts, claims=[], companies_house=None,
+            company_name="Test Café Ltd", company_number="",
+            dataroom="ingest_folder_test", tier=REAL_TIER,
+            out_dir=tmp_path / "out")
+        assert path.exists()
+        assert path.suffix in (".pdf", ".html")
+    finally:
+        conn.execute("DELETE FROM fact WHERE dataroom='ingest_folder_test'")
+        conn.commit()
+        conn.close()
+
+
 def test_pipeline_reports_unclassified(tmp_path):
     import psycopg
 

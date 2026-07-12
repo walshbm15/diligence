@@ -73,7 +73,13 @@ truth), `facts/` (Postgres fact table, provenance NOT NULL), `extraction/`
 `checks/` (6 deterministic checks: T1 x4 + T3.CHARGES + T3.LEASE),
 `report/` (HTML→PDF via headless Chrome, sufficiency score first),
 `evals/` (ground truth from spec, recall + accuracy scorers),
-`external/` (Companies House + Gazette clients + per-room fixture).
+`external/` (Companies House + Gazette clients + per-room fixture),
+`ingest/` (content classifier + real-folder path: `diligence ingest
+<folder|zip>` walks arbitrary nested folders, classifies by content,
+extracts to tier "real" with relative-path source_docs, accounts for
+every non-PDF/junk file, then reports without manifest/claims/fixture —
+live Companies House client used when --company-number +
+COMPANIES_HOUSE_API_KEY are present; charges check skips otherwise).
 
 **Measured (check layer, ground-truth facts):** 9/10 mutations caught,
 7/7 red, 0 false positives on clean room, 0 hallucinated citations.
@@ -97,4 +103,5 @@ scripts/run_extraction_eval.py` (resumes; only pays for missing docs).
 evals, `ruff check .` must pass. Commands: `diligence generate` (build
 synthetic rooms into data_rooms/), `diligence extract <room> --tier X`,
 `diligence report <room> [--ground-truth]` (credential-free demo →
-output/*.pdf).
+output/*.pdf), `diligence ingest <folder|zip> [--company-number N]`
+(real data room → facts → report; the issue #17 path).

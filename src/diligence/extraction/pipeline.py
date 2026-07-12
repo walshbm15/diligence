@@ -28,6 +28,17 @@ def _docs_with_facts(conn, dataroom: str, tier: str) -> set[str]:
     return {r["source_doc"] for r in rows}
 
 
+def replace_doc_facts(conn, facts, *, dataroom: str, tier: str,
+                      source_doc: str) -> None:
+    """Idempotent per-document write: prior facts for the doc are replaced."""
+    from diligence.facts.db import insert_facts
+
+    conn.execute(
+        "DELETE FROM fact WHERE dataroom=%s AND tier=%s AND source_doc=%s",
+        (dataroom, tier, source_doc))
+    insert_facts(conn, facts)
+
+
 def extract_dataroom(conn, extractor, room_dir: Path, tier: str,
                      dataroom: str | None = None,
                      resume: bool = False,
@@ -40,8 +51,6 @@ def extract_dataroom(conn, extractor, room_dir: Path, tier: str,
     Files the classifier can't place are reported in `unclassified`,
     never silently dropped.
     """
-    from diligence.facts.db import insert_facts
-
     dataroom = dataroom or room_dir.name
     tier_dir = room_dir / tier
     result = ExtractionResult(dataroom=dataroom, tier=tier)
@@ -65,10 +74,8 @@ def extract_dataroom(conn, extractor, room_dir: Path, tier: str,
         except Exception as exc:  # noqa: BLE001 — a bad doc must not kill the run
             result.failures.append(f"{pdf.name}: {exc}")
             continue
-        conn.execute(
-            "DELETE FROM fact WHERE dataroom=%s AND tier=%s AND source_doc=%s",
-            (dataroom, tier, pdf.name))
-        insert_facts(conn, facts)
+        replace_doc_facts(conn, facts, dataroom=dataroom, tier=tier,
+                          source_doc=pdf.name)
         result.documents += 1
         result.facts += len(facts)
         result.needs_review += sum(1 for f in facts if f.needs_review)

@@ -37,14 +37,29 @@ def html_to_pdf(html_path: Path, pdf_path: Path) -> bool:
     return True
 
 
-def build_context(facts, claims: list[dict], room_dir: Path,
-                  company_number: str) -> CheckContext:
-    ch = None
-    fixture = room_dir / "companies_house.json"
-    if fixture.exists():
-        ch = CompaniesHouseFixture(fixture)
-    return CheckContext(facts=FactIndex(facts), claims=claims,
-                        companies_house=ch, company_number=company_number)
+def build_report(facts, *, claims: list[dict], companies_house,
+                 company_name: str, company_number: str,
+                 dataroom: str, tier: str, out_dir: Path,
+                 needs_review: int = 0) -> Path:
+    """Checks -> sufficiency -> HTML (-> PDF). Shared by the synthetic-room
+    path (generate_report) and the real-folder path (diligence ingest)."""
+    ctx = CheckContext(facts=FactIndex(facts), claims=claims,
+                       companies_house=companies_house,
+                       company_number=company_number)
+    findings = run_all(ctx)
+    sufficiency = assess(ctx.facts, needs_review=needs_review)
+
+    html = render_report(
+        company_name=company_name, company_number=company_number,
+        findings=findings, sufficiency=sufficiency,
+        dataroom=dataroom, tier=tier)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    html_path = out_dir / f"red_flag_report_{dataroom}_{tier}.html"
+    html_path.write_text(html)
+    pdf_path = html_path.with_suffix(".pdf")
+    if html_to_pdf(html_path, pdf_path):
+        return pdf_path
+    return html_path
 
 
 def generate_report(facts, room_dir: Path, tier: str, out_dir: Path,
@@ -54,21 +69,13 @@ def generate_report(facts, room_dir: Path, tier: str, out_dir: Path,
     claims_file = room_dir / "claims.json"
     claims = json.loads(claims_file.read_text()) if claims_file.exists() else []
 
-    ctx = build_context(facts, claims, room_dir, company["number"])
-    findings = run_all(ctx)
-    sufficiency = assess(ctx.facts, needs_review=needs_review)
-
-    html = render_report(
+    fixture = room_dir / "companies_house.json"
+    ch = CompaniesHouseFixture(fixture) if fixture.exists() else None
+    return build_report(
+        facts, claims=claims, companies_house=ch,
         company_name=company["name"], company_number=company["number"],
-        findings=findings, sufficiency=sufficiency,
-        dataroom=room_dir.name, tier=tier)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    html_path = out_dir / f"red_flag_report_{room_dir.name}_{tier}.html"
-    html_path.write_text(html)
-    pdf_path = html_path.with_suffix(".pdf")
-    if html_to_pdf(html_path, pdf_path):
-        return pdf_path
-    return html_path
+        dataroom=room_dir.name, tier=tier, out_dir=out_dir,
+        needs_review=needs_review)
 
 
 def _ground_truth_facts(room_dir: Path):

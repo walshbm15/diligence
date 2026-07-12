@@ -14,6 +14,8 @@ def main() -> None:
     sub.add_parser("generate", help="Generate the synthetic data rooms")
     sub.add_parser("extract", help="Extract a data room into the fact table",
                    add_help=False)
+    sub.add_parser("ingest", help="Ingest a real data room (folder or zip) "
+                                  "and produce a report", add_help=False)
     sub.add_parser("report", help="Generate a Red Flag Report",
                    add_help=False)
     sub.add_parser("review", help="Review quarantined low-confidence facts",
@@ -31,6 +33,10 @@ def main() -> None:
         from diligence.extraction.pipeline import main as extract_main
 
         extract_main()
+    elif args.command == "ingest":
+        from diligence.ingest.folder import main as ingest_main
+
+        ingest_main()
     elif args.command == "report":
         from diligence.report.generate import main as report_main
 
