@@ -22,6 +22,12 @@ REAL_TIER = "real"
 
 _JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini"}
 _JUNK_DIRS = {"__macosx"}
+_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff",
+                   ".heic", ".heif"}
+_HEIF_SUFFIXES = {".heic", ".heif"}
+# Phone photos can be 48MP; cap the long edge so the PDF stays within
+# what the extractor was evaluated on (photographed tier, ~2000px pages).
+_MAX_IMAGE_PX = 2500
 
 
 @dataclass
@@ -30,6 +36,7 @@ class Inventory:
 
     root: Path
     pdfs: list[Path] = field(default_factory=list)        # relative paths
+    images: list[Path] = field(default_factory=list)       # phone photos/scans
     unsupported: list[Path] = field(default_factory=list)  # non-PDF documents
     ignored: int = 0                                       # OS junk only
 
@@ -51,9 +58,32 @@ def scan_folder(root: Path) -> Inventory:
             inv.ignored += 1
         elif path.suffix.lower() == ".pdf":
             inv.pdfs.append(rel)
+        elif path.suffix.lower() in _IMAGE_SUFFIXES:
+            inv.images.append(rel)
         else:
             inv.unsupported.append(rel)
     return inv
+
+
+def _heif_available() -> bool:
+    try:
+        from pillow_heif import register_heif_opener
+    except ImportError:
+        return False
+    register_heif_opener()
+    return True
+
+
+def image_to_pdf(image_path: Path, pdf_path: Path) -> None:
+    """Wrap a photo/scan as a one-page PDF so the normal classify->extract
+    path applies. The extractor is already evaluated on photographed pages."""
+    from PIL import Image, ImageOps
+
+    with Image.open(image_path) as img:
+        img = ImageOps.exif_transpose(img)  # respect phone orientation
+        img.thumbnail((_MAX_IMAGE_PX, _MAX_IMAGE_PX))
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        img.convert("RGB").save(pdf_path, "PDF", resolution=150)
 
 
 def unpack_zip(zip_path: Path) -> Path:
@@ -79,17 +109,46 @@ class IngestResult:
     ignored: int = 0
 
 
+def _process_pdf(conn, extractor, classifier, pdf_path: Path,
+                 source_doc: str, dataroom: str,
+                 result: IngestResult) -> None:
+    """Classify -> extract -> write, shared by native PDFs and converted
+    photos. Provenance always cites `source_doc` (the original file)."""
+    try:
+        doc_type = classifier.classify(pdf_path)
+        if doc_type is None:
+            result.unclassified.append(source_doc)
+            return
+        data = extractor.extract(pdf_path, doc_type)
+        facts = build_facts(doc_type, data, dataroom=dataroom,
+                            tier=REAL_TIER, source_doc=source_doc,
+                            extractor=extractor.name)
+    except Exception as exc:  # noqa: BLE001 — a bad doc must not kill the run
+        result.failures.append(f"{source_doc}: {exc}")
+        return
+    replace_doc_facts(conn, facts, dataroom=dataroom, tier=REAL_TIER,
+                      source_doc=source_doc)
+    result.documents += 1
+    result.facts += len(facts)
+    result.needs_review += sum(1 for f in facts if f.needs_review)
+    result.by_type[doc_type] = result.by_type.get(doc_type, 0) + 1
+
+
 def ingest_folder(conn, extractor, root: Path,
                   dataroom: str | None = None,
                   resume: bool = False,
                   classifier: Classifier | None = None) -> IngestResult:
-    """Extract every classifiable PDF under `root` into the fact table.
+    """Extract every classifiable PDF or photo under `root` into the fact
+    table.
 
     Unlike `extract_dataroom`, there is no tier subdirectory: the whole tree
     is walked and facts land under tier "real". `source_doc` is the path
     relative to `root` (posix), so identically-named files in different
-    subfolders can't collide.
+    subfolders can't collide. Images are wrapped as one-page PDFs and sent
+    down the same classify->extract path; provenance cites the image file.
     """
+    import tempfile
+
     dataroom = dataroom or root.name
     classifier = classifier or Classifier()
     inv = scan_folder(root)
@@ -105,24 +164,33 @@ def ingest_folder(conn, extractor, root: Path,
         if source_doc in done:
             result.skipped += 1
             continue
-        doc_type = classifier.classify(root / rel)
-        if doc_type is None:
-            result.unclassified.append(source_doc)
-            continue
-        try:
-            data = extractor.extract(root / rel, doc_type)
-            facts = build_facts(doc_type, data, dataroom=dataroom,
-                                tier=REAL_TIER, source_doc=source_doc,
-                                extractor=extractor.name)
-        except Exception as exc:  # noqa: BLE001 — a bad doc must not kill the run
-            result.failures.append(f"{source_doc}: {exc}")
-            continue
-        replace_doc_facts(conn, facts, dataroom=dataroom, tier=REAL_TIER,
-                          source_doc=source_doc)
-        result.documents += 1
-        result.facts += len(facts)
-        result.needs_review += sum(1 for f in facts if f.needs_review)
-        result.by_type[doc_type] = result.by_type.get(doc_type, 0) + 1
+        _process_pdf(conn, extractor, classifier, root / rel, source_doc,
+                     dataroom, result)
+
+    heif_ok = None
+    with tempfile.TemporaryDirectory(prefix="diligence_photos_") as td:
+        for rel in inv.images:
+            source_doc = rel.as_posix()
+            if source_doc in done:
+                result.skipped += 1
+                continue
+            if rel.suffix.lower() in _HEIF_SUFFIXES:
+                if heif_ok is None:
+                    heif_ok = _heif_available()
+                if not heif_ok:
+                    result.unsupported.append(
+                        f"{source_doc} (install pillow-heif for HEIC)")
+                    continue
+            # Mirror the tree so names stay intact for filename
+            # classification and can't collide across subfolders.
+            tmp_pdf = Path(td) / rel.parent / f"{rel.name}.pdf"
+            try:
+                image_to_pdf(root / rel, tmp_pdf)
+            except Exception as exc:  # noqa: BLE001 — a bad photo must not kill the run
+                result.failures.append(f"{source_doc}: {exc}")
+                continue
+            _process_pdf(conn, extractor, classifier, tmp_pdf, source_doc,
+                         dataroom, result)
     return result
 
 

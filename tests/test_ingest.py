@@ -103,9 +103,14 @@ def test_scan_folder_accounts_for_every_file(tmp_path):
     (tmp_path / "__MACOSX").mkdir()
     (tmp_path / "__MACOSX" / "._lease scan.pdf").write_bytes(b"junk")
 
+    (tmp_path / "IMG_4302.jpg").write_bytes(b"xx")
+    (tmp_path / "financials" / "receipt.HEIC").write_bytes(b"xx")
+
     inv = scan_folder(tmp_path)
     assert [p.as_posix() for p in inv.pdfs] == [
         "financials/Q2 24 return HMRC.pdf", "lease scan.pdf"]
+    assert [p.as_posix() for p in inv.images] == [
+        "IMG_4302.jpg", "financials/receipt.HEIC"]
     assert [p.as_posix() for p in inv.unsupported] == [
         "notes.docx", "suppliers.xlsx"]
     assert inv.ignored == 2  # .DS_Store + __MACOSX resource fork
@@ -124,6 +129,65 @@ def test_unpack_zip(tmp_path):
     assert (root / "accounts" / "fy25.pdf").exists()
     # Second call is a no-op, not a re-extract
     assert unpack_zip(zip_path) == root
+
+
+def _photo_of(pdf_path, out_path, scale=2.0):
+    """Photograph a rendered document page into an image file."""
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    image = doc[0].render(scale=scale).to_pil()
+    doc.close()
+    image.convert("RGB").save(out_path)
+
+
+def test_image_to_pdf_produces_one_page_pdf(tmp_path, messy_room):
+    import pypdfium2 as pdfium
+
+    from diligence.ingest import image_to_pdf
+
+    src = next(iter(messy_room.glob("*.pdf")))
+    photo = tmp_path / "photo.jpg"
+    _photo_of(src, photo)
+
+    out = tmp_path / "photo.jpg.pdf"
+    image_to_pdf(photo, out)
+    doc = pdfium.PdfDocument(str(out))
+    assert len(doc) == 1
+    doc.close()
+
+
+def test_image_to_pdf_caps_resolution(tmp_path):
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    from diligence.ingest import image_to_pdf
+
+    huge = tmp_path / "huge.png"
+    Image.new("RGB", (8000, 6000), "white").save(huge)
+    out = tmp_path / "huge.pdf"
+    image_to_pdf(huge, out)
+    doc = pdfium.PdfDocument(str(out))
+    # 2500px cap at 150dpi -> at most ~1200pt wide page
+    assert doc[0].get_size()[0] < 1300
+    doc.close()
+
+
+def test_image_to_pdf_reads_heic(tmp_path):
+    pillow_heif = pytest.importorskip("pillow_heif")
+    import pypdfium2 as pdfium
+    from PIL import Image
+
+    from diligence.ingest import image_to_pdf
+
+    pillow_heif.register_heif_opener()
+    heic = tmp_path / "IMG_0001.heic"
+    Image.new("RGB", (600, 400), "white").save(heic)
+    out = tmp_path / "IMG_0001.heic.pdf"
+    image_to_pdf(heic, out)
+    doc = pdfium.PdfDocument(str(out))
+    assert len(doc) == 1
+    doc.close()
 
 
 VAT_JSON = {
@@ -200,6 +264,91 @@ def test_ingest_folder_end_to_end(tmp_path, messy_room):
         assert path.suffix in (".pdf", ".html")
     finally:
         conn.execute("DELETE FROM fact WHERE dataroom='ingest_folder_test'")
+        conn.commit()
+        conn.close()
+
+
+def test_ingest_folder_extracts_photos(tmp_path, messy_room):
+    import psycopg
+
+    from diligence.extraction.extractor import FakeExtractor
+    from diligence.facts import connect, init_db
+    from diligence.facts.db import fetch_facts
+    from diligence.ingest import REAL_TIER, Classifier, ingest_folder
+
+    try:
+        conn = connect()
+    except psycopg.OperationalError:
+        pytest.skip("Postgres not reachable")
+    init_db(conn)
+
+    # A phone photo of the VAT return, conventionally named so the
+    # filename rule classifies it (no API in tests).
+    (tmp_path / "photos").mkdir()
+    vat_src = next(p for p in messy_room.glob("*.pdf") if "return" in p.name)
+    _photo_of(vat_src, tmp_path / "photos" / "vat_return_2024-06.jpg")
+
+    extractor = FakeExtractor(
+        responses={"vat_return_2024-06.jpg.pdf": VAT_JSON})
+    try:
+        result = ingest_folder(conn, extractor, tmp_path,
+                               dataroom="ingest_photo_test",
+                               classifier=Classifier(use_llm=False))
+        assert result.documents == 1
+        assert result.by_type == {"vat_return": 1}
+        assert result.failures == [] and result.unclassified == []
+
+        # Provenance cites the PHOTO, not the temp PDF
+        rows = fetch_facts(conn, "ingest_photo_test", REAL_TIER)
+        assert rows and all(
+            r["source_doc"] == "photos/vat_return_2024-06.jpg" for r in rows)
+
+        # resume treats the photo like any other done document
+        again = ingest_folder(conn, extractor, tmp_path,
+                              dataroom="ingest_photo_test", resume=True,
+                              classifier=Classifier(use_llm=False))
+        assert again.skipped == 1 and again.documents == 0
+    finally:
+        conn.execute("DELETE FROM fact WHERE dataroom='ingest_photo_test'")
+        conn.commit()
+        conn.close()
+
+
+def test_ingest_folder_contains_classifier_failures(tmp_path, messy_room):
+    """An API error during classification (rate limit, credits) must fail
+    that document, not kill the run — found live when credits ran out."""
+    import psycopg
+
+    from diligence.extraction.extractor import FakeExtractor
+    from diligence.facts import connect, init_db
+    from diligence.ingest import ingest_folder
+
+    try:
+        conn = connect()
+    except psycopg.OperationalError:
+        pytest.skip("Postgres not reachable")
+    init_db(conn)
+
+    vat_src = next(p for p in messy_room.glob("*.pdf") if "return" in p.name)
+    shutil.copy(vat_src, tmp_path / "vat_return_2024-06.pdf")
+    shutil.copy(vat_src, tmp_path / "zz mystery scan.pdf")
+
+    class ExplodingClassifier:
+        def classify(self, pdf_path):
+            if "mystery" in pdf_path.name:
+                raise RuntimeError("credit balance is too low")
+            return "vat_return"
+
+    extractor = FakeExtractor(responses={"vat_return_2024-06.pdf": VAT_JSON})
+    try:
+        result = ingest_folder(conn, extractor, tmp_path,
+                               dataroom="ingest_boom_test",
+                               classifier=ExplodingClassifier())
+        assert result.documents == 1  # the good doc still landed
+        assert len(result.failures) == 1
+        assert "zz mystery scan.pdf" in result.failures[0]
+    finally:
+        conn.execute("DELETE FROM fact WHERE dataroom='ingest_boom_test'")
         conn.commit()
         conn.close()
 

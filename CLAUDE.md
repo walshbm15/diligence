@@ -79,7 +79,11 @@ truth), `facts/` (Postgres fact table, provenance NOT NULL), `extraction/`
 extracts to tier "real" with relative-path source_docs, accounts for
 every non-PDF/junk file, then reports without manifest/claims/fixture —
 live Companies House client used when --company-number +
-COMPANIES_HOUSE_API_KEY are present; charges check skips otherwise).
+COMPANIES_HOUSE_API_KEY are present; charges check skips otherwise.
+Phone photos (jpg/png/heic/…) are wrapped as one-page PDFs and sent
+down the same classify→extract path; provenance cites the image file.
+Per-doc failure isolation covers classification too — an API error on
+one doc must never kill the run).
 
 **Measured (check layer, ground-truth facts):** 9/10 mutations caught,
 7/7 red, 0 false positives on clean room, 0 hallucinated citations.
