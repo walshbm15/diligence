@@ -82,14 +82,24 @@ class CafeConfig:
     seed: int = 20260401
     company_name: str = "The Copper Kettle Café Ltd"
     company_number: str = "13977581"
-    start: dt.date = dt.date(2024, 4, 1)  # first day of a month; FYE = 31 March
+    # `start` must be the first day of a month AND the first month of a VAT
+    # quarter — quarters are consecutive 3-month blocks from `start`, so the
+    # start month IS the VAT stagger (start June => quarters end
+    # Aug/Nov/Feb/May). `months` must be a multiple of 3 so every VAT
+    # quarter in the window is complete.
+    start: dt.date = dt.date(2024, 4, 1)
     months: int = 24
+    # Month the financial year ends in (3 = 31 March). FYs are derived
+    # independently of the window; only FYs fully inside the window get
+    # statutory accounts.
+    fye_month: int = 3
     opening_bank_balance: int = 30_000_00
     share_capital: int = 100_00
 
-    # Opening liabilities carried into the window (paid early in-window).
-    opening_vat_liability: int = 6_410_00  # Q1 Jan–Mar (pre-window), paid 8 May
-    opening_ct_liability: int = 7_820_00  # FYE pre-window, paid 1 Jan
+    # Opening liabilities carried into the window (paid at their statutory
+    # due dates: VAT ~5 weeks into the window, CT at pre-window FYE + 9mo + 1d).
+    opening_vat_liability: int = 6_410_00  # quarter ending just before start
+    opening_ct_liability: int = 7_820_00  # pre-window FYE
 
     # Sales model
     base_daily_takings: int = 1_150_00  # gross pence, pre-factor
@@ -139,6 +149,15 @@ class CafeConfig:
 
     dividend_quarterly: int = 6_000_00
     corporation_tax_rate: float = 0.19  # small profits rate
+
+    def __post_init__(self) -> None:
+        if self.start.day != 1:
+            raise ValueError("start must be the first day of a month")
+        if self.months % 3 != 0:
+            raise ValueError("months must be a multiple of 3 (whole VAT "
+                             "quarters)")
+        if not 1 <= self.fye_month <= 12:
+            raise ValueError("fye_month must be 1-12")
 
     @property
     def end(self) -> dt.date:

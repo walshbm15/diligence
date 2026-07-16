@@ -63,8 +63,11 @@ No auth, no billing, no dashboard.
 Weeks 1–3 of the POC are BUILT and merged; GitHub issues #1–#7, #9–#16
 closed. CI green. Do not rebuild these — extend them.
 
-**Code map:** `src/diligence/` — `ledger/` (seeded 24-month café ledger,
-integer pence, balance sheet ties exactly), `dataroom/` (spec builder +
+**Code map:** `src/diligence/` — `ledger/` (seeded café ledger, integer
+pence, balance sheet ties exactly; periods fully configurable — any FYE
+month, any VAT stagger via start month, window need not align to FY
+boundaries; sufficiency expectations derive from the room's manifest),
+`dataroom/` (spec builder +
 room builder; mutations edit the spec, never the ledger), `render/`
 (5 UK doc types via reportlab + scanned/photographed degradation),
 `mutations/` (10 planted discrepancies, `mutation_log.json` = eval ground

@@ -74,11 +74,20 @@ def build_dataroom(root: Path, config: CafeConfig | None = None,
         for p in paths:
             degrade(p, root / tier / p.name, tier)
 
+    from diligence.ledger.generator import financial_years
+
     manifest = {
         "company": spec.company.__dict__,
         "documents": [p.name for p in paths],
         "tiers": list(tiers),
         "mutations": spec.mutations,
+        # What a complete data room for THIS config looks like — sufficiency
+        # is scored against these, not against hardcoded café defaults.
+        "expectations": {
+            "bank_months": ledger.config.months,
+            "vat_quarters": ledger.config.months // 3,
+            "fys": len(financial_years(ledger.config)),
+        },
     }
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
     (root / "mutation_log.json").write_text(

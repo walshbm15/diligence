@@ -40,14 +40,27 @@ def html_to_pdf(html_path: Path, pdf_path: Path) -> bool:
 def build_report(facts, *, claims: list[dict], companies_house,
                  company_name: str, company_number: str,
                  dataroom: str, tier: str, out_dir: Path,
-                 needs_review: int = 0) -> Path:
+                 needs_review: int = 0,
+                 expectations: dict | None = None) -> Path:
     """Checks -> sufficiency -> HTML (-> PDF). Shared by the synthetic-room
-    path (generate_report) and the real-folder path (diligence ingest)."""
+    path (generate_report) and the real-folder path (diligence ingest).
+
+    `expectations` overrides what a complete data room looks like
+    (bank_months / vat_quarters / fys). Synthetic rooms derive it from
+    their config via the manifest; the real-room path passes nothing and
+    gets the assess() defaults — the 24-month/8-quarter/2-FY evidence base
+    a proper small-deal DD needs (deliberate: a seller sending one thin
+    quarter must NOT score 100)."""
     ctx = CheckContext(facts=FactIndex(facts), claims=claims,
                        companies_house=companies_house,
                        company_number=company_number)
     findings = run_all(ctx)
-    sufficiency = assess(ctx.facts, needs_review=needs_review)
+    exp = expectations or {}
+    sufficiency = assess(
+        ctx.facts, needs_review=needs_review,
+        expected_bank_months=exp.get("bank_months", 24),
+        expected_vat_quarters=exp.get("vat_quarters", 8),
+        expected_fys=exp.get("fys", 2))
 
     html = render_report(
         company_name=company_name, company_number=company_number,
@@ -71,11 +84,14 @@ def generate_report(facts, room_dir: Path, tier: str, out_dir: Path,
 
     fixture = room_dir / "companies_house.json"
     ch = CompaniesHouseFixture(fixture) if fixture.exists() else None
+    # Rooms built before expectations were added fall back to the café
+    # defaults baked into assess().
+    exp = manifest.get("expectations", {})
     return build_report(
         facts, claims=claims, companies_house=ch,
         company_name=company["name"], company_number=company["number"],
         dataroom=room_dir.name, tier=tier, out_dir=out_dir,
-        needs_review=needs_review)
+        needs_review=needs_review, expectations=exp)
 
 
 def _ground_truth_facts(room_dir: Path):

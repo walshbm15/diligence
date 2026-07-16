@@ -14,11 +14,16 @@ from dataclasses import dataclass
 from diligence.ledger.generator import (
     COGS_SUPPLIERS,
     amortization_schedule,
+    ct_slices,
+    financial_years,
     loan_balance_at,
     month_range,
     monthly_paye_bill,
     paye_breakdown,
+    quarter_ranges,
 )
+
+__all__ = ["financial_years", "quarter_ranges"]  # re-exported period helpers
 from diligence.ledger.models import (
     INFLOW_TYPES,
     CafeConfig,
@@ -136,11 +141,6 @@ class VatReturn:
         return 0
 
 
-def quarter_ranges(cfg: CafeConfig) -> list[tuple[dt.date, dt.date]]:
-    months = month_range(cfg.start, cfg.months)
-    return [(months[i][0], months[i + 2][1]) for i in range(0, cfg.months - 2, 3)]
-
-
 def vat_returns(ledger: Ledger) -> list[VatReturn]:
     out = []
     for qstart, qend in quarter_ranges(ledger.config):
@@ -196,12 +196,6 @@ def bank_balance_at(ledger: Ledger, at: dt.date) -> int:
 # --- Financial years / statutory accounts --------------------------------------
 
 
-def financial_years(cfg: CafeConfig) -> list[tuple[dt.date, dt.date]]:
-    months = month_range(cfg.start, cfg.months)
-    assert cfg.months % 12 == 0
-    return [(months[i][0], months[i + 11][1]) for i in range(0, cfg.months, 12)]
-
-
 def ct_charge(ledger: Ledger, fy_start: dt.date, fy_end: dt.date) -> int:
     cfg = ledger.config
     pbt = profit_before_tax(ledger.transactions, cfg, fy_start, fy_end)
@@ -228,13 +222,19 @@ def _till_cash_at(ledger: Ledger, at: dt.date) -> int:
 
 
 def _vat_accrual_at(ledger: Ledger, at: dt.date) -> int:
+    """VAT liability accrues transaction-by-transaction, not by quarter —
+    a balance sheet drawn mid-quarter (FYE off the VAT stagger) must carry
+    the partial quarter's net VAT. At quarter ends this equals the old
+    whole-quarter accrual exactly."""
     cfg = ledger.config
     accrued = cfg.opening_vat_liability
-    for qstart, qend in quarter_ranges(cfg):
-        if qend <= at:
-            q = ledger.in_period(qstart, qend)
-            accrued += sum(t.vat for t in q if t.type == TxnType.SALE)
-            accrued -= sum(t.vat for t in q if t.type == TxnType.SUPPLIER_PAYMENT)
+    for t in ledger.transactions:
+        if t.date > at:
+            continue
+        if t.type == TxnType.SALE:
+            accrued += t.vat
+        elif t.type == TxnType.SUPPLIER_PAYMENT:
+            accrued -= t.vat
     paid = sum(t.amount for t in ledger.transactions
                if t.type == TxnType.VAT_PAYMENT and t.date <= at)
     return accrued - paid
@@ -254,9 +254,9 @@ def _paye_accrual_at(ledger: Ledger, at: dt.date) -> int:
 def _ct_accrual_at(ledger: Ledger, at: dt.date) -> int:
     cfg = ledger.config
     accrued = cfg.opening_ct_liability
-    for fy_start, fy_end in financial_years(cfg):
-        if fy_end <= at:
-            accrued += ct_charge(ledger, fy_start, fy_end)
+    for slice_start, slice_end in ct_slices(cfg):
+        if slice_end <= at:
+            accrued += ct_charge(ledger, slice_start, slice_end)
     paid = sum(t.amount for t in ledger.transactions
                if t.type == TxnType.CORPORATION_TAX and t.date <= at)
     return accrued - paid
@@ -313,11 +313,14 @@ def balance_sheet(ledger: Ledger, at: dt.date) -> BalanceSheet:
     loan_bal = loan_balance_at(cfg, at)
     loan_current = _loan_principal_due_within(cfg, at)
 
+    # Profit accrues from the WINDOW start (where opening retained earnings
+    # are defined), not from the first full FY — a window that starts mid-FY
+    # has a stub whose profit is in the assets and must be in reserves too.
     retained = opening_retained_earnings(cfg)
-    for fy_start, fy_end in financial_years(cfg):
-        if fy_end <= at:
-            pbt = profit_before_tax(ledger.transactions, cfg, fy_start, fy_end)
-            retained += pbt - ct_charge(ledger, fy_start, fy_end)
+    retained += profit_before_tax(ledger.transactions, cfg, cfg.start, at)
+    for slice_start, slice_end in ct_slices(cfg):
+        if slice_end <= at:
+            retained -= ct_charge(ledger, slice_start, slice_end)
     retained -= sum(t.amount for t in ledger.transactions
                     if t.type == TxnType.DIVIDEND and t.date <= at)
 

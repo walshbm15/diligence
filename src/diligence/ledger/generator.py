@@ -46,6 +46,67 @@ def month_range(start: dt.date, months: int) -> list[tuple[dt.date, dt.date]]:
     return out
 
 
+def _month_end(year: int, month: int) -> dt.date:
+    y, m = (year + 1, 1) if month == 12 else (year, month + 1)
+    return dt.date(y, m, 1) - dt.timedelta(days=1)
+
+
+def quarter_ranges(cfg) -> list[tuple[dt.date, dt.date]]:
+    """VAT quarters: consecutive 3-month blocks from the window start. The
+    start month therefore IS the stagger (start June => quarters end
+    Aug/Nov/Feb/May)."""
+    months = month_range(cfg.start, cfg.months)
+    return [(months[i][0], months[i + 2][1]) for i in range(0, cfg.months - 2, 3)]
+
+
+def financial_years(cfg) -> list[tuple[dt.date, dt.date]]:
+    """Every full financial year (ending in cfg.fye_month) inside the
+    window. The window need not start on an FY boundary; partial years get
+    no statutory accounts — exactly like a real data room."""
+    out = []
+    fy_end = _month_end(cfg.start.year, cfg.fye_month)
+    while fy_end <= cfg.end:
+        if cfg.fye_month == 12:
+            fy_start = dt.date(fy_end.year, 1, 1)
+        else:
+            fy_start = dt.date(fy_end.year - 1, cfg.fye_month + 1, 1)
+        if fy_start >= cfg.start:
+            out.append((fy_start, fy_end))
+        fy_end = _month_end(fy_end.year + 1, cfg.fye_month)
+    return out
+
+
+def ct_slices(cfg) -> list[tuple[dt.date, dt.date]]:
+    """In-window slice of every financial year ENDING inside the window.
+
+    When the window starts mid-FY the first slice is a stub: corporation
+    tax is charged on its in-window profit only — the pre-window share of
+    that FY is part of cfg.opening_ct_liability. With a window aligned to
+    FY boundaries (the default config) the slices are exactly the full FYs.
+    """
+    out = []
+    fye = _month_end(cfg.start.year, cfg.fye_month)
+    if fye < cfg.start:
+        fye = _month_end(cfg.start.year + 1, cfg.fye_month)
+    while fye <= cfg.end:
+        if cfg.fye_month == 12:
+            fy_start = dt.date(fye.year, 1, 1)
+        else:
+            fy_start = dt.date(fye.year - 1, cfg.fye_month + 1, 1)
+        out.append((max(cfg.start, fy_start), fye))
+        fye = _month_end(fye.year + 1, cfg.fye_month)
+    return out
+
+
+def ct_due_date(fy_end: dt.date) -> dt.date:
+    """Corporation tax is due 9 months + 1 day after the FYE. FYEs are
+    month-ends, so that's the first day of the month 10 months on
+    (31 Mar -> 1 Jan; 30 Sep -> 1 Jul)."""
+    y, m = fy_end.year, fy_end.month + 10
+    y, m = y + (m - 1) // 12, (m - 1) % 12 + 1
+    return dt.date(y, m, 1)
+
+
 # Suppliers ----------------------------------------------------------------
 
 
@@ -268,7 +329,7 @@ def generate_ledger(config: CafeConfig | None = None) -> Ledger:
         ))
 
     # --- VAT payments (quarterly, due ~1 month + 7 days after quarter end) ---
-    quarters = [(months[i][0], months[i + 2][1]) for i in range(0, cfg.months - 2, 3)]
+    quarters = quarter_ranges(cfg)
     for qstart, qend in quarters:
         q_txns = [t for t in txns if qstart <= t.date <= qend]
         output_vat = sum(t.vat for t in q_txns if t.type == TxnType.SALE)
@@ -306,24 +367,34 @@ def generate_ledger(config: CafeConfig | None = None) -> Ledger:
         ))
 
     # --- Corporation tax --------------------------------------------------------
-    # Pre-window FYE liability paid 1 Jan of first window year.
-    txns.append(Transaction(
-        date=dt.date(start.year + 1, 1, 1), type=TxnType.CORPORATION_TAX,
-        description="HMRC CORPORATION TAX", amount=cfg.opening_ct_liability,
-        counterparty="HM Revenue & Customs",
-    ))
-    # FY1 (first 12 window months) liability paid 1 Jan of second window year.
-    # Charge = rate × FY1 profit before tax, computed from the rows above.
+    # Pre-window FYE liability, paid at its statutory due date (FYE + 9
+    # months + 1 day) when that falls inside the window.
+    prev_fye = _month_end(start.year, cfg.fye_month)
+    if prev_fye >= start:
+        prev_fye = _month_end(start.year - 1, cfg.fye_month)
+    opening_ct_due = ct_due_date(prev_fye)
+    if start <= opening_ct_due <= end:
+        txns.append(Transaction(
+            date=opening_ct_due, type=TxnType.CORPORATION_TAX,
+            description="HMRC CORPORATION TAX", amount=cfg.opening_ct_liability,
+            counterparty="HM Revenue & Customs",
+        ))
+    # Each in-window CT slice's liability, paid at its due date if still in
+    # window. Charge = rate × slice profit before tax, computed from the
+    # rows above (CT payments themselves don't affect PBT).
     from diligence.ledger.aggregates import profit_before_tax
 
-    fy1_start, fy1_end = months[0][0], months[11][1]
-    fy1_pbt = profit_before_tax(txns, cfg, fy1_start, fy1_end)
-    ct_fy1 = max(0, round(fy1_pbt * cfg.corporation_tax_rate))
-    txns.append(Transaction(
-        date=dt.date(start.year + 2, 1, 1), type=TxnType.CORPORATION_TAX,
-        description="HMRC CORPORATION TAX", amount=ct_fy1,
-        counterparty="HM Revenue & Customs",
-    ))
+    for slice_start, slice_end in ct_slices(cfg):
+        due = ct_due_date(slice_end)
+        if due > end:
+            continue
+        pbt = profit_before_tax(txns, cfg, slice_start, slice_end)
+        txns.append(Transaction(
+            date=due, type=TxnType.CORPORATION_TAX,
+            description="HMRC CORPORATION TAX",
+            amount=max(0, round(pbt * cfg.corporation_tax_rate)),
+            counterparty="HM Revenue & Customs",
+        ))
 
     txns.sort(key=lambda t: (t.date, t.type, t.description))
     return Ledger(config=cfg, transactions=txns)
