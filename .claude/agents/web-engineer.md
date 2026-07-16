@@ -65,6 +65,14 @@ every push/PR — all three must pass before you're done. Verify visually
 when layout changes: build, `npm run start`, screenshot with headless
 Chrome at 1440px and 390px.
 
+## Shipping work
+
+During the POC, verified work is committed directly to `main` (lint +
+test + build green first). Once the project is past the POC gate and
+deploying to production, ship completed changes with the **ship-it**
+skill instead — feature branch, local test gate, detailed commit, push,
+and a PR with a clear description.
+
 ## Standards
 
 - TypeScript everywhere; no `any`.

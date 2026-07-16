@@ -49,3 +49,6 @@ Two staged issues define the architecture — read them before anything:
   document — never a round-trip per fact), idempotent per document
   (replace-not-append, mirroring `replace_doc_facts`).
 - Update CLAUDE.md's build status and the issue when milestones land.
+- Ship all work through the **ship-it** skill (feature branch, local
+  test gate, PR). By the time this agent is writing code the project is
+  past the POC gate — PR flow, not direct commits to `main`.

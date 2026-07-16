@@ -86,3 +86,11 @@ scripts/run_extraction_eval.py       # live extraction eval (resumes)
 - Update CLAUDE.md's build-status section when closing an issue.
 - The repo is PUBLIC: no secrets, no real personal data in fixtures or
   tests; `output/` and `data_rooms/` are gitignored.
+
+## Shipping work
+
+During the POC, verified work is committed directly to `main` (tests +
+ruff green first). Once the project is past the POC gate and deploying
+to production, ship completed changes with the **ship-it** skill instead
+— it creates a feature branch, runs the relevant test suites locally,
+commits with a detailed message, pushes, and opens a PR for review.
